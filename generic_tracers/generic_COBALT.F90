@@ -2847,12 +2847,13 @@ contains
     real :: mu_temp, mu_opt
     integer :: yearday
     real :: rev_angle, dec_angle, temp_arg
+    ! real :: epsln = 1.0e-12
 
     logical ::  phos_nh3_override
     logical ::  pha_all_same = .true.
 
     real, dimension(:,:,:), Allocatable :: ztop, zmid, zbot
-    real, dimension(:,:,:), Allocatable :: pre_totn, net_srcn, post_totn
+    real, dimension(:,:,:), Allocatable :: pre_totn, net_srcn, post_totn!, add_totn ! changed by adding add_totn for area to put nitrogen
     real, dimension(:,:,:), Allocatable :: pre_totp, net_srcp, post_totp
     real, dimension(:,:,:), Allocatable :: pre_totsi, post_totsi
     real, dimension(:,:,:), Allocatable :: pre_totfe, net_srcfe, post_totfe
@@ -3498,13 +3499,28 @@ contains
     !
     ! Uptake of nitrate and ammonia
     !
-    do k = 1, nk ; do j = jsc, jec ; do i = isc, iec   !{
+    
+    allocate(rho_dzt_bot(isc:iec,jsc:jec))
+    allocate(k_bot(isc:iec,jsc:jec))
+    k_bot(i,j) = 0
+    rho_dzt_bot = 0.0
+    
+    do k = nk,1,-1 ; do j = jsc, jec ; do i = isc, iec   !{
+       
+       if (rho_dzt_bot(i,j).lt.(cobalt%Rho_0*cobalt%bottom_thickness)) then
+           rho_dzt_bot(i,j) = rho_dzt_bot(i,j) + rho_dzt(i,j,k)
+           k_bot(i,j) = k
+           n = DIAZO
+           phyto(n)%mu(i,j,k) = 0.0
+           do n = 2, NUM_PHYTO !{
+              phyto(n)%mu(i,j,k) = 0.0
+           enddo !} n
+       endif
        n = DIAZO
        phyto(n)%juptake_n2(i,j,k) =  max(0.0,(1.0 - phyto(n)%no3lim(i,j,k) - phyto(n)%nh4lim(i,j,k))* &
           phyto(n)%mu(i,j,k)*phyto(n)%f_n(i,j,k))
        phyto(n)%juptake_nh4(i,j,k) = max(0.0,phyto(n)%nh4lim(i,j,k)* phyto(n)%mu(i,j,k)*phyto(n)%f_n(i,j,k))
        phyto(n)%juptake_no3(i,j,k) = max(0.0,phyto(n)%no3lim(i,j,k)* phyto(n)%mu(i,j,k)*phyto(n)%f_n(i,j,k))
-
        ! If growth is negative, results in net respiration and production of nh4, aerobic loss in all cases
        ! jo2resp_wc is a cumulative variable that tracks the total oxygen consumption in the water column
        cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) - min(0.0,phyto(n)%mu(i,j,k)*phyto(n)%f_n(i,j,k))
@@ -3520,6 +3536,8 @@ contains
           cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) - min(0.0,phyto(n)%mu(i,j,k)*phyto(n)%f_n(i,j,k))*cobalt%o2_2_nh4
        enddo !} n
     enddo;  enddo ; enddo !} i,j,k
+    
+    ! deallocate(rho_dzt_bot)
     !
     ! Phosphorous uptake
     !
@@ -3619,26 +3637,29 @@ contains
     !  ammonia (NH3).  Scheme 1 is from COBALTv1.  Note that the acclimation irradiance, which reflects
     !  the irradiance during daylight hours, has been used to impose nitrification photoinhibition.
     !
-    do k = 1, nk ; do j = jsc, jec ; do i = isc, iec   !{
-       cobalt%juptake_nh4nitrif(i,j,k) = 0.0
-       if (scheme_nitrif .eq. 2 .or. scheme_nitrif .eq. 3) then
-          if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min_nit) then  !{
-             cobalt%juptake_nh4nitrif(i,j,k) = cobalt%gamma_nitrif * &
-                  cobalt%f_nh3(i,j,k)/(cobalt%f_nh3(i,j,k)+cobalt%k_nh3_nitrif) *  &
-                  (1.-cobalt%f_irr_aclm(i,j,k)/(cobalt%irr_inhibit+cobalt%f_irr_aclm(i,j,k))) * &
-                  cobalt%f_o2(i,j,k)/(cobalt%k_o2_nit+cobalt%f_o2(i,j,k)) * cobalt%f_nh4(i,j,k)**2
 
-             if (scheme_nitrif .eq. 3) then
-                cobalt%juptake_nh4nitrif(i,j,k) = cobalt%juptake_nh4nitrif(i,j,k)*cobalt%expkT(i,j,k)
-             end if
-          end if
-       elseif (scheme_nitrif .eq. 1) then
-          if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
-             cobalt%juptake_nh4nitrif(i,j,k) = cobalt%gamma_nitrif * cobalt%expkT(i,j,k) * cobalt%f_nh4(i,j,k) * &
-                  phyto(SMALL)%nh4lim(i,j,k) * (1.0 - cobalt%f_irr_aclm(i,j,k) / &
-                  (cobalt%irr_inhibit + cobalt%f_irr_aclm(i,j,k))) * cobalt%f_o2(i,j,k) / &
-                  ( cobalt%k_o2 + cobalt%f_o2(i,j,k) )
-          end if
+    do k = 1,nk ; do j = jsc, jec ; do i = isc, iec   !{
+       cobalt%juptake_nh4nitrif(i,j,k) = 0.0
+       if (k.lt.k_bot(i,j)) then
+         if (scheme_nitrif .eq. 2 .or. scheme_nitrif .eq. 3) then
+            if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min_nit) then  !{
+               cobalt%juptake_nh4nitrif(i,j,k) = cobalt%gamma_nitrif * &
+                     cobalt%f_nh3(i,j,k)/(cobalt%f_nh3(i,j,k)+cobalt%k_nh3_nitrif) *  &
+                     (1.-cobalt%f_irr_aclm(i,j,k)/(cobalt%irr_inhibit+cobalt%f_irr_aclm(i,j,k))) * &
+                     cobalt%f_o2(i,j,k)/(cobalt%k_o2_nit+cobalt%f_o2(i,j,k)) * cobalt%f_nh4(i,j,k)**2
+
+               if (scheme_nitrif .eq. 3) then
+                  cobalt%juptake_nh4nitrif(i,j,k) = cobalt%juptake_nh4nitrif(i,j,k)*cobalt%expkT(i,j,k)
+               end if
+            end if
+         elseif (scheme_nitrif .eq. 1) then
+            if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
+               cobalt%juptake_nh4nitrif(i,j,k) = cobalt%gamma_nitrif * cobalt%expkT(i,j,k) * cobalt%f_nh4(i,j,k) * &
+                     phyto(SMALL)%nh4lim(i,j,k) * (1.0 - cobalt%f_irr_aclm(i,j,k) / &
+                     (cobalt%irr_inhibit + cobalt%f_irr_aclm(i,j,k))) * cobalt%f_o2(i,j,k) / &
+                     ( cobalt%k_o2 + cobalt%f_o2(i,j,k) )
+            end if
+         endif
        end if
        ! Add the oxygen used for nitrification to the total water column respiration
        cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k)+cobalt%juptake_nh4nitrif(i,j,k)*cobalt%o2_2_nitrif
@@ -3653,7 +3674,7 @@ contains
     ! back calculate an effective maximum ldon uptake rate (at 0 deg. C) for bacteria, i.e.:
     ! mu_max = gge_max*vmax - bresp; so (vmax = mu_max+bresp)/gge_max
     vmax_bact = (1.0/bact(1)%gge_max)*(bact(1)%mu_max + bact(1)%bresp)
-    do k = 1, nk  ; do j = jsc, jec ; do i = isc, iec   !{
+    do k = 1,nk  ; do j = jsc, jec ; do i = isc, iec   !{
        !
        ! Calculate the growth rate of heterotrophic bacteria (bact%mu)
        !
@@ -3678,15 +3699,19 @@ contains
        bact(1)%jprod_nh4(i,j,k) = bact(1)%juptake_ldon(i,j,k) - max(bact(1)%jprod_n(i,j,k),0.0)
        cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + bact(1)%jprod_nh4(i,j,k)
 
-       if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
-          ! aerobic remineralization, nh4 production, o2 respired
-          cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + bact(1)%jprod_nh4(i,j,k)*cobalt%o2_2_nh4
+       if (k.lt.k_bot(i,j)) then
+         if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
+            ! aerobic remineralization, nh4 production, o2 respired
+            cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + bact(1)%jprod_nh4(i,j,k)*cobalt%o2_2_nh4
+         else
+            ! low o2 leads to water column denitrification. nh4 is created, but no o2 is used
+            cobalt%jno3denit_wc(i,j,k) = cobalt%jno3denit_wc(i,j,k) + &
+                                          bact(1)%jprod_nh4(i,j,k)*cobalt%n_2_n_denit
+         endif  !}
        else
-          ! low o2 leads to water column denitrification. nh4 is created, but no o2 is used
-          cobalt%jno3denit_wc(i,j,k) = cobalt%jno3denit_wc(i,j,k) + &
-                                       bact(1)%jprod_nh4(i,j,k)*cobalt%n_2_n_denit
-       endif  !}
-
+         cobalt%jno3denit_wc(i,j,k) = cobalt%jno3denit_wc(i,j,k) + &
+                                          bact(1)%jprod_nh4(i,j,k)*cobalt%n_2_n_denit
+       endif
        ! produce phosphate
        bact(1)%jprod_po4(i,j,k) = bact(1)%juptake_ldop(i,j,k) - max(bact(1)%jprod_n(i,j,k)*bact(1)%q_p_2_n,0.0)
        cobalt%jprod_po4(i,j,k) = cobalt%jprod_po4(i,j,k) + bact(1)%jprod_po4(i,j,k)
@@ -4259,6 +4284,7 @@ contains
 
        ! Production of detritus and dissolved organic material from higher predator egestion
        ! (just added to cumulative total. It is easy to calculate from phi_det and hp_jingest)
+
        cobalt%jprod_ndet(i,j,k) = cobalt%jprod_ndet(i,j,k) + cobalt%hp_phi_det*cobalt%hp_jingest_n(i,j,k)
        cobalt%jprod_pdet(i,j,k) = cobalt%jprod_pdet(i,j,k) + cobalt%hp_phi_det*cobalt%hp_jingest_p(i,j,k)
        cobalt%jprod_fedet(i,j,k) = cobalt%jprod_fedet(i,j,k) + cobalt%hp_phi_det*cobalt%hp_jingest_fe(i,j,k)
@@ -4340,10 +4366,14 @@ contains
        ! Straile, D., 1997. Gross growth efficiencies of protozoan and metazoan zooplankton and their dependence on
        !   food concentration, predator-prey weight ratio, and taxonomic group. Limnol. and Oceanogr. 42, 1375-1385.
        !    https://doi.org/10.4319/lo.1997.42.6.137
-
+   
        do m = 1,NUM_ZOO
           ! calculate the assimilation efficiency
-          assim_eff = 1.0-zoo(m)%phi_det-zoo(m)%phi_ldon-zoo(m)%phi_sldon-zoo(m)%phi_srdon
+          if (k.lt.k_bot(i,j)) then
+            assim_eff = 1.0-zoo(m)%phi_det-zoo(m)%phi_ldon-zoo(m)%phi_sldon-zoo(m)%phi_srdon
+          else
+            assim_eff = 0.0
+          endif
 
           ! calculate production assuming N is limiting
           zoo(m)%jprod_n(i,j,k) = zoo(m)%gge_max*zoo(m)%jingest_n(i,j,k) - &
@@ -4352,7 +4382,7 @@ contains
           ! Adjust downward if there is insufficient phosphorus to support N-based zooplankton growth.  This assumes
           ! that the zooplankter can used its full allotment of assimilated P
           zoo(m)%jprod_n(i,j,k) = min(zoo(m)%jprod_n(i,j,k), &
-                                      assim_eff*zoo(m)%jingest_p(i,j,k)/zoo(m)%q_p_2_n)
+                                       assim_eff*zoo(m)%jingest_p(i,j,k)/zoo(m)%q_p_2_n)
 
           ! Ingested material that does not go to zooplankton production or egestion (i.e., detrital production or
           ! production of dissolved organic material) is excreted as nh4 or po4 as part of the respiration process.
@@ -4393,12 +4423,12 @@ contains
        enddo !} m
 
        ! Food ingested by higher predators that is not egested to detritus is excreted
-       cobalt%jprod_fed(i,j,k) = cobalt%jprod_fed(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_fe(i,j,k)
-       cobalt%jprod_sio4(i,j,k) = cobalt%jprod_sio4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_sio2(i,j,k)
-       cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_n(i,j,k)
-       cobalt%jprod_po4(i,j,k) = cobalt%jprod_po4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_p(i,j,k)
-       cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_n(i,j,k)* &
-                                  cobalt%o2_2_nh4
+         cobalt%jprod_fed(i,j,k) = cobalt%jprod_fed(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_fe(i,j,k)
+         cobalt%jprod_sio4(i,j,k) = cobalt%jprod_sio4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_sio2(i,j,k)
+         cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_n(i,j,k)
+         cobalt%jprod_po4(i,j,k) = cobalt%jprod_po4(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_p(i,j,k)
+         cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + (1.0-cobalt%hp_phi_det)*cobalt%hp_jingest_n(i,j,k)* &
+                                    cobalt%o2_2_nh4
 
     enddo; enddo ; enddo !} i,j,k
     call mpp_clock_end(id_clock_production_loop)
@@ -4512,23 +4542,37 @@ contains
     ! Armstrong, 2002: https://doi.org/10.1016/S0967-0645(01)00101-1
     ! Klaas and Archer, 2002: https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2001GB001765
     ! Dunne et al., 2005: https://agupubs.onlinelibrary.wiley.com/doi/full/10.1029/2004GB002390    
+
     !
     do k=1,nk ; do j=jsc,jec ; do i=isc,iec  !{
        cobalt%expkreminT(i,j,k) = exp(cobalt%kappa_remin * Temp(i,j,k))
-       ! Calculate remineralization under aerobic remineralization
-       if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
-          cobalt%jremin_ndet(i,j,k) = cobalt%gamma_ndet * cobalt%expkreminT(i,j,k) * &
-               zbot(i,j,k)/(zbot(i,j,k) + cobalt%remin_ramp_scale) * cobalt%f_o2(i,j,k) / &
-               ( cobalt%k_o2 + cobalt%f_o2(i,j,k) )*max( 0.0, cobalt%f_ndet(i,j,k) - &
-               cobalt%rpcaco3*(cobalt%f_cadet_arag(i,j,k) + cobalt%f_cadet_calc(i,j,k)) - &
-               cobalt%rplith*cobalt%f_lithdet(i,j,k) - cobalt%rpsio2*cobalt%f_sidet(i,j,k) )
-          ! Augment total nh4 production and o2 consumption
-          cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + cobalt%jremin_ndet(i,j,k)
-          cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + cobalt%jremin_ndet(i,j,k)*cobalt%o2_2_nh4
+       if (k.lt.k_bot(i,j)) then
+         ! Calculate remineralization under aerobic remineralization
+         if (cobalt%f_o2(i,j,k) .gt. cobalt%o2_min) then  !{
+            cobalt%jremin_ndet(i,j,k) = cobalt%gamma_ndet * cobalt%expkreminT(i,j,k) * &
+                  zbot(i,j,k)/(zbot(i,j,k) + cobalt%remin_ramp_scale) * cobalt%f_o2(i,j,k) / &
+                  ( cobalt%k_o2 + cobalt%f_o2(i,j,k) )*max( 0.0, cobalt%f_ndet(i,j,k) - &
+                  cobalt%rpcaco3*(cobalt%f_cadet_arag(i,j,k) + cobalt%f_cadet_calc(i,j,k)) - &
+                  cobalt%rplith*cobalt%f_lithdet(i,j,k) - cobalt%rpsio2*cobalt%f_sidet(i,j,k) )
+            ! Augment total nh4 production and o2 consumption
+            cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + cobalt%jremin_ndet(i,j,k)
+            cobalt%jo2resp_wc(i,j,k) = cobalt%jo2resp_wc(i,j,k) + cobalt%jremin_ndet(i,j,k)*cobalt%o2_2_nh4
 
-       ! Calculate remineralization under anaerobic conditions
-       else !}{
-          cobalt%jremin_ndet(i,j,k) = cobalt%gamma_ndet * cobalt%o2_min / &
+         ! Calculate remineralization under anaerobic conditions
+         else !}{
+            cobalt%jremin_ndet(i,j,k) = cobalt%gamma_ndet * cobalt%o2_min / &
+                  (cobalt%k_o2 + cobalt%o2_min)* &
+                  cobalt%f_no3(i,j,k) / (cobalt%k_no3_denit + cobalt%f_no3(i,j,k))* &
+                  max(0.0, cobalt%f_ndet(i,j,k) - &
+                  cobalt%rpcaco3*(cobalt%f_cadet_arag(i,j,k) + cobalt%f_cadet_calc(i,j,k)) - &
+                  cobalt%rplith*cobalt%f_lithdet(i,j,k) - cobalt%rpsio2*cobalt%f_sidet(i,j,k) )
+            ! Augment total nh4 production and no3 consumption
+            cobalt%jno3denit_wc(i,j,k) = cobalt%jno3denit_wc(i,j,k) + cobalt%jremin_ndet(i,j,k) * cobalt%n_2_n_denit
+            cobalt%jprod_nh4(i,j,k) = cobalt%jprod_nh4(i,j,k) + cobalt%jremin_ndet(i,j,k)
+         endif !}
+       else 
+       ! Purely anaerobic processes so as to not deplete oxygen
+         cobalt%jremin_ndet(i,j,k) = cobalt%gamma_ndet * cobalt%o2_min / &
                (cobalt%k_o2 + cobalt%o2_min)* &
                cobalt%f_no3(i,j,k) / (cobalt%k_no3_denit + cobalt%f_no3(i,j,k))* &
                max(0.0, cobalt%f_ndet(i,j,k) - &
@@ -4657,8 +4701,8 @@ contains
     ! uses conditions over a specified bottom layer thickness (cobalt%bottom_thickness, default = 1m) for bottom calcs.
 
     ! Local variables used to determine the layers falling within the bottom thickness
-    allocate(rho_dzt_bot(isc:iec,jsc:jec))
-    allocate(k_bot(isc:iec,jsc:jec))
+    ! allocate(rho_dzt_bot(isc:iec,jsc:jec))
+    ! allocate(k_bot(isc:iec,jsc:jec))
 
     do j = jsc, jec; do i = isc, iec  !{
        if (grid_kmt(i,j) .gt. 0) then !{
