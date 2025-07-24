@@ -3846,10 +3846,10 @@ contains
           endif
        enddo  !}  m
        cobalt%hp_temp_lim(i,j,k) = exp(cobalt%ktemp_hp*Temp(i,j,k))
-       !if (k.lt.k_bot(i,j)) then
-       cobalt%hp_o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
-                                (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
-       !endif
+       if (k.lt.k_bot(i,j)) then
+           cobalt%hp_o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
+                                    (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+       endif
 
        ! Prey vectors for ingestion and loss calculations
        ! Note: ordering must match that used for the prey availability matrices above 
