@@ -3709,6 +3709,7 @@ contains
                                           bact(1)%jprod_nh4(i,j,k)*cobalt%n_2_n_denit
          endif  !}
        else
+         ! purely denitrification in the bottom so no o2 is used
          cobalt%jno3denit_wc(i,j,k) = cobalt%jno3denit_wc(i,j,k) + &
                                           bact(1)%jprod_nh4(i,j,k)*cobalt%n_2_n_denit
        endif
@@ -3839,12 +3840,16 @@ contains
        ! Since zooplankton ingestion uses oxygen, there is no zooplankton feeding when f_o2 is less than o2_min.
        do m = 1,3  !{
           zoo(m)%temp_lim(i,j,k) = exp(zoo(m)%ktemp*Temp(i,j,k))
-          zoo(m)%o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
-                                (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+          if (k.lt.k_bot(i,j)) then
+            zoo(m)%o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
+                                 (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+          endif
        enddo  !}  m
        cobalt%hp_temp_lim(i,j,k) = exp(cobalt%ktemp_hp*Temp(i,j,k))
+       !if (k.lt.k_bot(i,j)) then
        cobalt%hp_o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
                                 (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+       !endif
 
        ! Prey vectors for ingestion and loss calculations
        ! Note: ordering must match that used for the prey availability matrices above 
@@ -4369,11 +4374,11 @@ contains
    
        do m = 1,NUM_ZOO
           ! calculate the assimilation efficiency
-          if (k.lt.k_bot(i,j)) then
-            assim_eff = 1.0-zoo(m)%phi_det-zoo(m)%phi_ldon-zoo(m)%phi_sldon-zoo(m)%phi_srdon
-          else
-            assim_eff = 0.0
-          endif
+          !if (k.lt.k_bot(i,j)) then
+          assim_eff = 1.0-zoo(m)%phi_det-zoo(m)%phi_ldon-zoo(m)%phi_sldon-zoo(m)%phi_srdon
+          !else
+          !  assim_eff = 0.0
+          !endif
 
           ! calculate production assuming N is limiting
           zoo(m)%jprod_n(i,j,k) = zoo(m)%gge_max*zoo(m)%jingest_n(i,j,k) - &
