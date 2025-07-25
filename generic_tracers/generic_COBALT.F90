@@ -3839,16 +3839,16 @@ contains
        ! Calculate the temperature and oxygen limitations for zooplankton feeding and growth
        ! Since zooplankton ingestion uses oxygen, there is no zooplankton feeding when f_o2 is less than o2_min.
        do m = 1,3  !{
-          zoo(m)%temp_lim(i,j,k) = exp(zoo(m)%ktemp*Temp(i,j,k))
           if (k.lt.k_bot(i,j)) then
             zoo(m)%o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
                                  (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+            zoo(m)%temp_lim(i,j,k) = exp(zoo(m)%ktemp*Temp(i,j,k))
           endif
        enddo  !}  m
-       cobalt%hp_temp_lim(i,j,k) = exp(cobalt%ktemp_hp*Temp(i,j,k))
        if (k.lt.k_bot(i,j)) then
            cobalt%hp_o2lim(i,j,k) = max((cobalt%f_o2(i,j,k) - cobalt%o2_min),0.0)/ &
                                     (cobalt%k_o2 + max(cobalt%f_o2(i,j,k)-cobalt%o2_min,0.0))
+           cobalt%hp_temp_lim(i,j,k) = exp(cobalt%ktemp_hp*Temp(i,j,k))
        endif
 
        ! Prey vectors for ingestion and loss calculations
